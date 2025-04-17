@@ -1,0 +1,12 @@
+{
+    "manifest_version": 3,
+    "name": "DOI Citation Fetcher",
+    "version": "1.0",
+    "description": "Fetches AMA-style citations for a given DOI",
+    "action": {
+      "default_popup": "popup.html"
+    },
+    "permissions": ["activeTab"],
+    "host_permissions": ["https://citation.doi.org/*"]
+  }
+  
