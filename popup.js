@@ -135,3 +135,16 @@ function renderDOIList(dois) {
 
 // Extract page content and parse DOIs
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  chrome.scripting.executeScript(
+    {
+      target: { tabId: tabs[0].id },
+      func: () => document.body.innerText,
+    },
+    (results) => {
+      const pageText = results[0]?.result || '';
+      const dois = extractDOIsFromPageContent(pageText);
+      renderDOIList(dois);
+    }
+  );
+});
+
