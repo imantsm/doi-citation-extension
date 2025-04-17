@@ -12,6 +12,7 @@
   ],
   "host_permissions": [
     "https://citation.doi.org/*",
+    "https://eutils.ncbi.nlm.nih.gov/*",
     "<all_urls>"
   ],
   "icons": {

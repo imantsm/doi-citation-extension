@@ -92,14 +92,11 @@ function extractDOIsFromPageContent(content) {
   return [...dois];
 }
 
-function renderDOIList(dois) {
-  if (dois.length === 0) {
-    detectedDOIContainer.innerHTML = '<p>No DOIs detected on this page.</p>';
-    return;
-  }
+function renderDOIList(dois, label = 'Detected DOIs') {
+  if (dois.length === 0) return;
 
   const title = document.createElement('h4');
-  title.textContent = 'Detected DOIs:';
+  title.textContent = label;
   detectedDOIContainer.appendChild(title);
 
   dois.forEach((doi) => {
@@ -133,6 +130,35 @@ function renderDOIList(dois) {
   });
 }
 
+async function fallbackCheckForPMID(content) {
+  // Look for PMID: or pubmed URL
+  const pmidMatch = content.match(/PMID[:\s]*([0-9]+)/i) ||
+                    content.match(/https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/([0-9]+)/i);
+
+  if (!pmidMatch) return;
+
+  const pmid = pmidMatch[1];
+  try {
+    const response = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
+    const xmlText = await response.text();
+
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+    const doiNode = xmlDoc.querySelector('Item[Name="doi"]');
+    if (doiNode && doiNode.textContent) {
+      renderDOIList([doiNode.textContent], `Detected DOI from PMID: ${pmid}`);
+    } else {
+      const msg = document.createElement('div');
+      msg.textContent = `PMID ${pmid} found, but no DOI is available in PubMed metadata.`;
+      msg.style.fontStyle = 'italic';
+      detectedDOIContainer.appendChild(msg);
+    }
+  } catch (err) {
+    console.error('Failed to fetch or parse PubMed metadata:', err);
+  }
+}
+
 // Extract page content and parse DOIs
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   chrome.scripting.executeScript(
@@ -143,8 +169,12 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     (results) => {
       const pageText = results[0]?.result || '';
       const dois = extractDOIsFromPageContent(pageText);
-      renderDOIList(dois);
+
+      if (dois.length > 0) {
+        renderDOIList(dois);
+      } else {
+        fallbackCheckForPMID(pageText);
+      }
     }
   );
 });
-
