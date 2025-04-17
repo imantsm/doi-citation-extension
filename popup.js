@@ -131,35 +131,73 @@ function renderDOIList(dois, label = 'Detected DOIs') {
 }
 
 async function fallbackCheckForPMID(content) {
-  // Look for PMID: or pubmed URL
   const pmidMatch = content.match(/PMID[:\s]*([0-9]+)/i) ||
                     content.match(/https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/([0-9]+)/i);
 
   if (!pmidMatch) return;
 
   const pmid = pmidMatch[1];
-  try {
-    const response = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
-    const xmlText = await response.text();
 
+  try {
+    // Step 1: Try to get DOI from esummary.fcgi
+    const summaryResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
+    const xmlText = await summaryResponse.text();
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
 
     const doiNode = xmlDoc.querySelector('Item[Name="doi"]');
+
     if (doiNode && doiNode.textContent) {
       renderDOIList([doiNode.textContent], `Detected DOI from PMID: ${pmid}`);
     } else {
-      const msg = document.createElement('div');
-      msg.textContent = `PMID ${pmid} found, but no DOI is available in PubMed metadata.`;
-      msg.style.fontStyle = 'italic';
-      detectedDOIContainer.appendChild(msg);
+      // Step 2: Try to get citation JSON from /citations/
+      const citationResp = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
+      const citationJSON = await citationResp.json();
+      const pmidKey = `pmid:${pmid}`;
+      const citationData = citationJSON[pmidKey];
+
+      if (citationData?.ama?.orig) {
+        const block = document.createElement('div');
+        block.className = 'citation-block';
+
+        const label = document.createElement('h4');
+        label.textContent = `Citation (from PMID ${pmid}, DOI not found):`;
+
+        const outputEl = document.createElement('div');
+        outputEl.textContent = citationData.ama.orig;
+
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copy';
+        copyBtn.style.marginTop = '5px';
+
+        copyBtn.addEventListener('click', () => {
+          navigator.clipboard.writeText(outputEl.textContent).then(() => {
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+          });
+        });
+
+        block.appendChild(label);
+        block.appendChild(outputEl);
+        block.appendChild(copyBtn);
+        detectedDOIContainer.appendChild(block);
+      } else {
+        const msg = document.createElement('div');
+        msg.textContent = `PMID ${pmid} found, but no DOI or citation info was available.`;
+        msg.style.fontStyle = 'italic';
+        detectedDOIContainer.appendChild(msg);
+      }
     }
   } catch (err) {
-    console.error('Failed to fetch or parse PubMed metadata:', err);
+    console.error('Failed to fetch or parse PubMed info or citation:', err);
+    const msg = document.createElement('div');
+    msg.textContent = `Error fetching citation info for PMID ${pmid}.`;
+    msg.style.fontStyle = 'italic';
+    detectedDOIContainer.appendChild(msg);
   }
 }
 
-// Extract page content and parse DOIs
+// Main content extraction + DOI/PMID detection
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   chrome.scripting.executeScript(
     {
