@@ -2,6 +2,32 @@ const citationContainer = document.getElementById('citation');
 const copyButton = document.getElementById('copyButton');
 const fetchCitationBtn = document.getElementById('fetchCitation');
 const detectedDOIContainer = document.getElementById('autoDetectedDOIs');
+const styleSelect = document.getElementById('styleSelect');
+
+// Load citation styles on popup open
+async function loadStyles() {
+  try {
+    const response = await fetch('https://citation.doi.org/styles');
+    const styles = await response.json();
+    styles.sort();
+
+    styleSelect.innerHTML = ''; // Clear placeholder
+    styles.forEach((style) => {
+      const option = document.createElement('option');
+      option.value = style;
+      option.textContent = style;
+      if (style === 'american-medical-association') {
+        option.selected = true;
+      }
+      styleSelect.appendChild(option);
+    });
+  } catch (error) {
+    console.error('Failed to load styles:', error);
+    styleSelect.innerHTML = '<option value="american-medical-association">american-medical-association</option>';
+  }
+}
+
+loadStyles();
 
 fetchCitationBtn.addEventListener('click', async () => {
   const doiValue = document.getElementById('doiInput').value.trim();
@@ -25,9 +51,11 @@ copyButton.addEventListener('click', () => {
 });
 
 async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
+  const style = styleSelect.value || 'american-medical-association';
+
   try {
     const response = await fetch(
-      `https://citation.doi.org/format?doi=${encodeURIComponent(doi)}&style=american-medical-association&lang=en-US`,
+      `https://citation.doi.org/format?doi=${encodeURIComponent(doi)}&style=${encodeURIComponent(style)}&lang=en-US`,
       {
         headers: {
           'Accept': 'text/x-bibliography'
@@ -49,14 +77,12 @@ async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
 function extractDOIsFromPageContent(content) {
   const dois = new Set();
 
-  // Match links like https://doi.org/10.xxxx
   const linkRegex = /https?:\/\/doi\.org\/(10\.\d{4,9}\/[^\s"'>]+)/gi;
   const linkMatches = content.matchAll(linkRegex);
   for (const match of linkMatches) {
     dois.add(match[1]);
   }
 
-  // Match "DOI: 10.xxxx"
   const textRegex = /DOI[:\s]*?(10\.\d{4,9}\/[^\s"'>]+)/gi;
   const textMatches = content.matchAll(textRegex);
   for (const match of textMatches) {
@@ -107,17 +133,5 @@ function renderDOIList(dois) {
   });
 }
 
-// Inject content script to get page text
+// Extract page content and parse DOIs
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  chrome.scripting.executeScript(
-    {
-      target: { tabId: tabs[0].id },
-      func: () => document.body.innerText,
-    },
-    (results) => {
-      const pageText = results[0]?.result || '';
-      const dois = extractDOIsFromPageContent(pageText);
-      renderDOIList(dois);
-    }
-  );
-});
