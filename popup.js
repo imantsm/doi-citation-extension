@@ -154,15 +154,9 @@ async function fallbackCheckForPMID(content) {
       const citationResp = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
       const citationJSON = await citationResp.json();
 
-      const keys = Object.keys(citationJSON);
       console.log('Raw citation JSON:', citationJSON);
-      console.log('Available citation keys:', keys);
+      const citationData = citationJSON;
 
-      // Find the matching key that includes the PMID
-      const matchingKey = keys.find(key => key.toLowerCase().includes(pmid.toLowerCase()));
-      console.log('Matching key:', matchingKey);
-
-      const citationData = citationJSON[matchingKey];
 
       if (citationData?.ama?.orig) {
         const block = document.createElement('div');
