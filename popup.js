@@ -153,15 +153,16 @@ async function fallbackCheckForPMID(content) {
       // Step 2: Try to get citation JSON from /citations/
       const citationResp = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
       const citationJSON = await citationResp.json();
-      console.log('Raw citation JSON:', citationJSON);
-      console.log('Trying to access key:', pmidKey);
-      console.log('Found:', citationJSON[pmidKey]);
 
       const keys = Object.keys(citationJSON);
+      console.log('Raw citation JSON:', citationJSON);
       console.log('Available citation keys:', keys);
 
-      const pmidKey = `pmid:${pmid}`;
-      const citationData = citationJSON[pmidKey];
+      // Find the matching key that includes the PMID
+      const matchingKey = keys.find(key => key.toLowerCase().includes(pmid.toLowerCase()));
+      console.log('Matching key:', matchingKey);
+
+      const citationData = citationJSON[matchingKey];
 
       if (citationData?.ama?.orig) {
         const block = document.createElement('div');
@@ -203,6 +204,7 @@ async function fallbackCheckForPMID(content) {
     detectedDOIContainer.appendChild(msg);
   }
 }
+
 
 // Main content extraction + DOI/PMID detection
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
