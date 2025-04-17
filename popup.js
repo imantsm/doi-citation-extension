@@ -153,6 +153,13 @@ async function fallbackCheckForPMID(content) {
       // Step 2: Try to get citation JSON from /citations/
       const citationResp = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
       const citationJSON = await citationResp.json();
+      console.log('Raw citation JSON:', citationJSON);
+      console.log('Trying to access key:', pmidKey);
+      console.log('Found:', citationJSON[pmidKey]);
+
+      const keys = Object.keys(citationJSON);
+      console.log('Available citation keys:', keys);
+
       const pmidKey = `pmid:${pmid}`;
       const citationData = citationJSON[pmidKey];
 
