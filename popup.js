@@ -11,7 +11,7 @@ async function loadStyles() {
     const styles = await response.json();
     styles.sort();
 
-    styleSelect.innerHTML = ''; // Clear placeholder
+    styleSelect.innerHTML = '';
     styles.forEach((style) => {
       const option = document.createElement('option');
       option.value = style;
@@ -30,16 +30,28 @@ async function loadStyles() {
 loadStyles();
 
 fetchCitationBtn.addEventListener('click', async () => {
-  const doiValue = document.getElementById('doiInput').value.trim();
+  const userInput = document.getElementById('doiInput').value.trim();
   citationContainer.textContent = 'Fetching citation...';
   copyButton.style.display = 'none';
 
-  if (!doiValue) {
-    citationContainer.textContent = 'Please enter a DOI.';
+  if (!userInput) {
+    citationContainer.textContent = 'Please enter a DOI or PMID.';
     return;
   }
 
-  await fetchAndDisplayCitation(doiValue, citationContainer, copyButton);
+  const doiFromURL = userInput.match(/10\.\d{4,9}\/[^\s]+/);
+  const isPMID = /^[0-9]+$/.test(userInput);
+  const isDOI = /^10\.\d{4,9}\/[^\s]+$/.test(userInput);
+
+  if (isPMID) {
+    await fallbackCheckForPMID(`PMID: ${userInput}`);
+  } else if (isDOI) {
+    await fetchAndDisplayCitation(userInput, citationContainer, copyButton);
+  } else if (doiFromURL) {
+    await fetchAndDisplayCitation(doiFromURL[0], citationContainer, copyButton);
+  } else {
+    citationContainer.textContent = 'Invalid input. Please enter a valid DOI or PMID.';
+  }
 });
 
 copyButton.addEventListener('click', () => {
@@ -139,7 +151,6 @@ async function fallbackCheckForPMID(content) {
   const pmid = pmidMatch[1];
 
   try {
-    // Step 1: Try to get DOI from esummary.fcgi
     const summaryResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
     const xmlText = await summaryResponse.text();
     const parser = new DOMParser();
@@ -150,13 +161,10 @@ async function fallbackCheckForPMID(content) {
     if (doiNode && doiNode.textContent) {
       renderDOIList([doiNode.textContent], `Detected DOI from PMID: ${pmid}`);
     } else {
-      // Step 2: Try to get citation JSON from /citations/
       const citationResp = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
       const citationJSON = await citationResp.json();
 
-      console.log('Raw citation JSON:', citationJSON);
       const citationData = citationJSON;
-
 
       if (citationData?.ama?.orig) {
         const block = document.createElement('div');
@@ -199,8 +207,7 @@ async function fallbackCheckForPMID(content) {
   }
 }
 
-
-// Main content extraction + DOI/PMID detection
+// Detect DOIs from current page
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   chrome.scripting.executeScript(
     {
