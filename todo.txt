@@ -1,0 +1,3 @@
+List of features to add
+
+[ ] User selection persistence
