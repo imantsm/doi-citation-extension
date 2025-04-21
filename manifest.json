@@ -8,7 +8,8 @@
   },
   "permissions": [
     "scripting",
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "host_permissions": [
     "https://citation.doi.org/*",
