@@ -18,6 +18,61 @@ function cleanDOI(doi) {
     .trim();
 }
 
+async function loadStyles() {
+  const STYLES_CACHE_KEY = 'cachedStyles';
+  const STYLES_TIMESTAMP_KEY = 'stylesLastUpdated';
+  const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+  chrome.storage.local.get(['preferredStyle', STYLES_CACHE_KEY, STYLES_TIMESTAMP_KEY], async (result) => {
+    const savedStyle = result.preferredStyle || 'american-medical-association';
+    const cachedStyles = result[STYLES_CACHE_KEY];
+    const lastUpdated = result[STYLES_TIMESTAMP_KEY];
+
+    const now = Date.now();
+    const isFresh = cachedStyles && lastUpdated && (now - lastUpdated < MAX_AGE_MS);
+
+    let styles = [];
+
+    if (isFresh) {
+      console.log('[Style Loader] Loaded styles from local cache');
+      styles = cachedStyles;
+    } else {
+      console.log('[Style Loader] Fetching styles from https://citation.doi.org/styles');
+      try {
+        const response = await fetch('https://citation.doi.org/styles');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        styles = await response.json();
+        styles.sort();
+        chrome.storage.local.set({
+          [STYLES_CACHE_KEY]: styles,
+          [STYLES_TIMESTAMP_KEY]: now
+        });
+        console.log('[Style Loader] Fetched and cached styles');
+      } catch (err) {
+        console.error('[Style Loader] Failed to fetch styles:', err);
+        styles = ['american-medical-association']; // fallback
+      }
+    }
+
+    // Populate dropdown
+    styleSelect.innerHTML = '';
+    styles.forEach(style => {
+      const option = document.createElement('option');
+      option.value = style;
+      option.textContent = style;
+      styleSelect.appendChild(option);
+    });
+
+    // Restore previously selected style
+    if (styles.includes(savedStyle)) {
+      styleSelect.value = savedStyle;
+    } else {
+      styleSelect.value = 'american-medical-association';
+    }
+  });
+}
+
+
 function renderDOIList(dois, label = 'Detected DOIs') {
   if (dois.length === 0) return;
 
@@ -163,22 +218,8 @@ function extractDOIsAndPMIDs(content) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get(['preferredStyle'], (result) => {
-    const saved = result.preferredStyle || 'american-medical-association';
-    fetch('https://citation.doi.org/styles')
-      .then(res => res.json())
-      .then(styles => {
-        styles.sort();
-        styleSelect.innerHTML = '';
-        styles.forEach(style => {
-          const option = document.createElement('option');
-          option.value = style;
-          option.textContent = style;
-          styleSelect.appendChild(option);
-        });
-        styleSelect.value = saved;
-      });
-  });
+  loadStyles();
+
 
   styleSelect.addEventListener('change', () => {
     chrome.storage.local.set({ preferredStyle: styleSelect.value });
