@@ -1,23 +1,28 @@
+// === DOM References ===
 const citationContainer = document.getElementById('citation');
 const copyButton = document.getElementById('copyButton');
 const fetchCitationBtn = document.getElementById('fetchCitation');
 const detectedDOIContainer = document.getElementById('autoDetectedDOIs');
 const styleSelect = document.getElementById('styleSelect');
 
-const pubmedThrottleDelay = 400;
+// === PubMed API throttling delay ===
+const pubmedThrottleDelay = 400; // milliseconds between PubMed requests
 
+// Utility to wait (used to respect rate limits)
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Cleans up DOI strings by removing extra punctuation, quotes, or suffixes
 function cleanDOI(doi) {
   return doi
-    .replace(/["'“”‘’]+/g, '')
-    .replace(/\b(Citations|References|Accessed|Published).*$/i, '')
-    .replace(/[.,;:)\]}\s]+$/, '')
+    .replace(/["'“”‘’]+/g, '') // Remove quotation marks
+    .replace(/\b(Citations|References|Accessed|Published).*$/i, '') // Strip trailing labels
+    .replace(/[.,;:)\]}\s]+$/, '') // Trim punctuation at the end
     .trim();
 }
 
+// Loads style list (from cache if fresh; otherwise fetches it), then populates dropdown
 async function loadStyles() {
   const STYLES_CACHE_KEY = 'cachedStyles';
   const STYLES_TIMESTAMP_KEY = 'stylesLastUpdated';
@@ -54,7 +59,7 @@ async function loadStyles() {
       }
     }
 
-    // Populate dropdown
+    // Populate the dropdown
     styleSelect.innerHTML = '';
     styles.forEach(style => {
       const option = document.createElement('option');
@@ -63,16 +68,14 @@ async function loadStyles() {
       styleSelect.appendChild(option);
     });
 
-    // Restore previously selected style
-    if (styles.includes(savedStyle)) {
-      styleSelect.value = savedStyle;
-    } else {
-      styleSelect.value = 'american-medical-association';
-    }
+    // Select previously saved style if available
+    styleSelect.value = styles.includes(savedStyle)
+      ? savedStyle
+      : 'american-medical-association';
   });
 }
 
-
+// Renders clickable list of DOIs
 function renderDOIList(dois, label = 'Detected DOIs') {
   if (dois.length === 0) return;
 
@@ -85,6 +88,7 @@ function renderDOIList(dois, label = 'Detected DOIs') {
     doiEl.className = 'found-doi';
     doiEl.textContent = doi;
 
+    // Fetch citation when clicked
     doiEl.addEventListener('click', () => {
       const citationBlock = document.createElement('div');
       citationBlock.className = 'citation-block';
@@ -111,6 +115,7 @@ function renderDOIList(dois, label = 'Detected DOIs') {
   });
 }
 
+// Fetches a citation for a given DOI using the selected style
 async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
   const style = styleSelect.value || 'american-medical-association';
 
@@ -118,9 +123,7 @@ async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
     const response = await fetch(
       `https://citation.doi.org/format?doi=${encodeURIComponent(doi)}&style=${encodeURIComponent(style)}&lang=en-US`,
       {
-        headers: {
-          'Accept': 'text/x-bibliography'
-        }
+        headers: { 'Accept': 'text/x-bibliography' }
       }
     );
 
@@ -135,6 +138,7 @@ async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
   }
 }
 
+// Renders clickable PMIDs and fetches citation only after click
 function renderPMIDList(pmids) {
   if (pmids.length === 0) return;
 
@@ -147,6 +151,7 @@ function renderPMIDList(pmids) {
     pmidEl.className = 'found-doi';
     pmidEl.textContent = `PMID: ${pmid}`;
 
+    // On click, fetch citation (XML first, then fallback)
     pmidEl.addEventListener('click', async () => {
       const citationBlock = document.createElement('div');
       citationBlock.className = 'citation-block';
@@ -167,6 +172,7 @@ function renderPMIDList(pmids) {
       });
 
       try {
+        // Step 1: Try to fetch DOI via esummary XML
         const xmlRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
         const xmlText = await xmlRes.text();
         const parser = new DOMParser();
@@ -177,10 +183,10 @@ function renderPMIDList(pmids) {
           const doi = cleanDOI(doiNode.textContent);
           await fetchAndDisplayCitation(doi, outputEl, copyBtn);
         } else {
+          // Step 2: Fall back to /citations/ JSON if no DOI
           await sleep(pubmedThrottleDelay);
           const fallbackRes = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
-          const fallbackJson = await fallbackRes.json();
-          const citationData = fallbackJson;
+          const citationData = await fallbackRes.json();
 
           if (citationData?.ama?.orig) {
             outputEl.textContent = citationData.ama.orig;
@@ -200,6 +206,7 @@ function renderPMIDList(pmids) {
   });
 }
 
+// Scans page content for DOIs and PMIDs using regular expressions
 function extractDOIsAndPMIDs(content) {
   const doiRegex = /10\.\d{4,9}\/[\w.()\-;/:]+/gi;
   const pmidRegex = /\bPMID[:\s]*([0-9]{5,10})\b|https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/([0-9]{5,10})/gi;
@@ -217,14 +224,16 @@ function extractDOIsAndPMIDs(content) {
   return { dois: uniqueDOIs, pmids: uniquePMIDs };
 }
 
+// === Main Extension Logic ===
 document.addEventListener('DOMContentLoaded', () => {
-  loadStyles();
+  loadStyles(); // Populate dropdown with styles from cache or network
 
-
+  // Save selected style to local storage
   styleSelect.addEventListener('change', () => {
     chrome.storage.local.set({ preferredStyle: styleSelect.value });
   });
 
+  // Manual input handler (DOI or PMID)
   fetchCitationBtn.addEventListener('click', async () => {
     const input = document.getElementById('doiInput').value.trim();
     citationContainer.textContent = 'Fetching citation...';
@@ -250,6 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Manual copy button for results container
   copyButton.addEventListener('click', () => {
     navigator.clipboard.writeText(citationContainer.textContent).then(() => {
       copyButton.textContent = 'Copied!';
@@ -257,6 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Auto-detect DOIs/PMIDs from current tab
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.scripting.executeScript(
       {
