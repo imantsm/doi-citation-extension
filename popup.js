@@ -2,6 +2,13 @@ const citationContainer = document.getElementById('citation');
 const copyButton = document.getElementById('copyButton');
 const fetchCitationBtn = document.getElementById('fetchCitation');
 const detectedDOIContainer = document.getElementById('autoDetectedDOIs');
+const styleSelect = document.getElementById('styleSelect');
+
+const pubmedThrottleDelay = 400;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function cleanDOI(doi) {
   return doi
@@ -50,8 +57,7 @@ function renderDOIList(dois, label = 'Detected DOIs') {
 }
 
 async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
-  const styleSelect = document.getElementById('styleSelect');
-  const style = styleSelect?.value || 'american-medical-association';
+  const style = styleSelect.value || 'american-medical-association';
 
   try {
     const response = await fetch(
@@ -74,143 +80,128 @@ async function fetchAndDisplayCitation(doi, targetEl, copyBtn = null) {
   }
 }
 
-async function fallbackCheckForPMID(content) {
-  const pmidMatch = content.match(/PMID[:\s]*([0-9]+)/i) ||
-                    content.match(/https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/([0-9]+)/i);
+function renderPMIDList(pmids) {
+  if (pmids.length === 0) return;
 
-  if (!pmidMatch) return;
+  const title = document.createElement('h4');
+  title.textContent = 'Detected PMIDs:';
+  detectedDOIContainer.appendChild(title);
 
-  const pmid = pmidMatch[1];
+  pmids.forEach((pmid) => {
+    const pmidEl = document.createElement('div');
+    pmidEl.className = 'found-doi';
+    pmidEl.textContent = `PMID: ${pmid}`;
 
-  try {
-    const summaryResponse = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
-    const xmlText = await summaryResponse.text();
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+    pmidEl.addEventListener('click', async () => {
+      const citationBlock = document.createElement('div');
+      citationBlock.className = 'citation-block';
+      const outputEl = document.createElement('div');
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy';
+      copyBtn.style.marginTop = '5px';
 
-    const doiNode = xmlDoc.querySelector('Item[Name="doi"]');
+      citationBlock.appendChild(outputEl);
+      citationBlock.appendChild(copyBtn);
+      pmidEl.insertAdjacentElement('afterend', citationBlock);
 
-    if (doiNode && doiNode.textContent) {
-      renderDOIList([cleanDOI(doiNode.textContent)], `Detected DOI from PMID: ${pmid}`);
-    } else {
-      const citationResp = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
-      const citationJSON = await citationResp.json();
-      const citationData = citationJSON;
-
-      if (citationData?.ama?.orig) {
-        const block = document.createElement('div');
-        block.className = 'citation-block';
-
-        const label = document.createElement('h4');
-        label.textContent = `Citation (from PMID ${pmid}, DOI not found):`;
-
-        const outputEl = document.createElement('div');
-        outputEl.textContent = citationData.ama.orig;
-
-        const copyBtn = document.createElement('button');
-        copyBtn.textContent = 'Copy';
-        copyBtn.style.marginTop = '5px';
-
-        copyBtn.addEventListener('click', () => {
-          navigator.clipboard.writeText(outputEl.textContent).then(() => {
-            copyBtn.textContent = 'Copied!';
-            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
-          });
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(outputEl.textContent).then(() => {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
         });
+      });
 
-        block.appendChild(label);
-        block.appendChild(outputEl);
-        block.appendChild(copyBtn);
-        detectedDOIContainer.appendChild(block);
-      } else {
-        const msg = document.createElement('div');
-        msg.textContent = `PMID ${pmid} found, but no DOI or citation info was available.`;
-        msg.style.fontStyle = 'italic';
-        detectedDOIContainer.appendChild(msg);
+      try {
+        const xmlRes = await fetch(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${pmid}`);
+        const xmlText = await xmlRes.text();
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+        const doiNode = xmlDoc.querySelector('Item[Name="doi"]');
+
+        if (doiNode?.textContent) {
+          const doi = cleanDOI(doiNode.textContent);
+          await fetchAndDisplayCitation(doi, outputEl, copyBtn);
+        } else {
+          await sleep(pubmedThrottleDelay);
+          const fallbackRes = await fetch(`https://pubmed.ncbi.nlm.nih.gov/${pmid}/citations/`);
+          const fallbackJson = await fallbackRes.json();
+          const citationData = fallbackJson;
+
+          if (citationData?.ama?.orig) {
+            outputEl.textContent = citationData.ama.orig;
+            copyBtn.style.display = 'block';
+          } else {
+            outputEl.textContent = `PMID ${pmid} found, but no citation info was available.`;
+            copyBtn.style.display = 'none';
+          }
+        }
+      } catch (err) {
+        outputEl.textContent = `Error fetching citation for PMID ${pmid}.`;
+        console.error('PMID fetch error:', err);
       }
-    }
-  } catch (err) {
-    console.error('Failed to fetch or parse PubMed info or citation:', err);
-    const msg = document.createElement('div');
-    msg.textContent = `Error fetching citation info for PMID ${pmid}.`;
-    msg.style.fontStyle = 'italic';
-    detectedDOIContainer.appendChild(msg);
+    });
+
+    detectedDOIContainer.appendChild(pmidEl);
+  });
+}
+
+function extractDOIsAndPMIDs(content) {
+  const doiRegex = /10\.\d{4,9}\/[\w.()\-;/:]+/gi;
+  const pmidRegex = /\bPMID[:\s]*([0-9]{5,10})\b|https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/([0-9]{5,10})/gi;
+
+  const rawDOIs = [...content.matchAll(doiRegex)].map(m => cleanDOI(m[0]));
+  const uniqueDOIs = [...new Set(rawDOIs)];
+
+  const rawPMIDs = [];
+  for (const match of content.matchAll(pmidRegex)) {
+    const id = match[1] || match[2];
+    if (id) rawPMIDs.push(id);
   }
+  const uniquePMIDs = [...new Set(rawPMIDs)];
+
+  return { dois: uniqueDOIs, pmids: uniquePMIDs };
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const styleSelect = document.getElementById('styleSelect');
-
-  async function loadStyles() {
-    try {
-      const response = await fetch('https://citation.doi.org/styles');
-      const styles = await response.json();
-      styles.sort();
-
-      styleSelect.innerHTML = '';
-
-      if (!chrome?.storage?.local) {
-        console.warn('chrome.storage.local is unavailable. Defaulting to AMA.');
-        styles.forEach((style) => {
-          const option = document.createElement('option');
-          option.value = style;
-          option.textContent = style;
-          if (style === 'american-medical-association') {
-            option.selected = true;
-          }
-          styleSelect.appendChild(option);
-        });
-        return;
-      }
-
-      chrome.storage.local.get(['preferredStyle'], (result) => {
-        const savedStyle = result.preferredStyle || 'american-medical-association';
-
-        styles.forEach((style) => {
+  chrome.storage.local.get(['preferredStyle'], (result) => {
+    const saved = result.preferredStyle || 'american-medical-association';
+    fetch('https://citation.doi.org/styles')
+      .then(res => res.json())
+      .then(styles => {
+        styles.sort();
+        styleSelect.innerHTML = '';
+        styles.forEach(style => {
           const option = document.createElement('option');
           option.value = style;
           option.textContent = style;
           styleSelect.appendChild(option);
         });
-
-        styleSelect.value = savedStyle;
+        styleSelect.value = saved;
       });
-
-    } catch (error) {
-      console.error('Failed to load styles:', error);
-      styleSelect.innerHTML = '<option value="american-medical-association">american-medical-association</option>';
-    }
-  }
-
-  loadStyles();
+  });
 
   styleSelect.addEventListener('change', () => {
-    if (chrome?.storage?.local) {
-      chrome.storage.local.set({ preferredStyle: styleSelect.value }, () => {
-        console.log('[Style] Saved preferred style:', styleSelect.value);
-      });
-    }
+    chrome.storage.local.set({ preferredStyle: styleSelect.value });
   });
 
   fetchCitationBtn.addEventListener('click', async () => {
-    const styleSelect = document.getElementById('styleSelect');
-    const userInput = document.getElementById('doiInput').value.trim();
+    const input = document.getElementById('doiInput').value.trim();
     citationContainer.textContent = 'Fetching citation...';
     copyButton.style.display = 'none';
 
-    if (!userInput) {
+    if (!input) {
       citationContainer.textContent = 'Please enter a DOI or PMID.';
       return;
     }
 
-    const doiFromURL = userInput.match(/10\.\d{4,9}\/[^"]+/);
-    const isPMID = /^[0-9]+$/.test(userInput);
-    const isDOI = /^10\.\d{4,9}\/[^"]+$/.test(userInput);
+    const doiFromURL = input.match(/10\.\d{4,9}\/[^"]+/);
+    const isPMID = /^[0-9]{5,10}$/.test(input);
+    const isDOI = /^10\.\d{4,9}\/[^"]+$/.test(input);
 
     if (isPMID) {
-      await fallbackCheckForPMID(`PMID: ${userInput}`);
+      renderPMIDList([input]);
     } else if (isDOI) {
-      await fetchAndDisplayCitation(cleanDOI(userInput), citationContainer, copyButton);
+      await fetchAndDisplayCitation(cleanDOI(input), citationContainer, copyButton);
     } else if (doiFromURL) {
       await fetchAndDisplayCitation(cleanDOI(doiFromURL[0]), citationContainer, copyButton);
     } else {
@@ -219,8 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   copyButton.addEventListener('click', () => {
-    const text = citationContainer.textContent;
-    navigator.clipboard.writeText(text).then(() => {
+    navigator.clipboard.writeText(citationContainer.textContent).then(() => {
       copyButton.textContent = 'Copied!';
       setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
     });
@@ -230,61 +220,13 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.scripting.executeScript(
       {
         target: { tabId: tabs[0].id },
-        func: () => {
-          const text = document.body.innerText;
-          const links = [...document.querySelectorAll('a[href*="doi.org/"]')];
-          const hrefs = links.map(l => l.href);
-          return JSON.stringify({ text, hrefs });
-        }
+        func: () => document.body.innerText
       },
       async (results) => {
-        const result = results[0]?.result;
-        if (!result) return;
-
-        const { text, hrefs } = JSON.parse(result);
-
-        const rawDOIs = [];
-        const strictDOIRegex = /10\.\d{4,9}\/[\w.()\-;/:]+/gi;
-
-        hrefs.forEach(href => {
-          const match = href.match(strictDOIRegex);
-          if (match) rawDOIs.push(...match);
-        });
-
-        for (const match of text.matchAll(strictDOIRegex)) {
-          rawDOIs.push(match[0]);
-        }
-
-        const cleaned = rawDOIs.map(cleanDOI).filter(doi => doi.length >= 10);
-        const uniqueDOIs = [...new Set(cleaned)];
-
-        const validatedDOIs = [];
-        for (let i = 0; i < uniqueDOIs.length; i++) {
-          const doi = uniqueDOIs[i];
-          const hasShorterMatch = uniqueDOIs.some(other =>
-            other !== doi && doi.includes(other)
-          );
-
-          if (!hasShorterMatch) {
-            validatedDOIs.push(doi);
-          } else {
-            try {
-              const res = await fetch(
-                `https://citation.doi.org/format?doi=${encodeURIComponent(doi)}&style=american-medical-association&lang=en-US`,
-                { headers: { 'Accept': 'text/x-bibliography' } }
-              );
-              if (res.ok) validatedDOIs.push(doi);
-            } catch (err) {
-              console.warn(`Rejected likely invalid DOI: ${doi}`);
-            }
-          }
-        }
-
-        if (validatedDOIs.length > 0) {
-          renderDOIList(validatedDOIs);
-        } else {
-          fallbackCheckForPMID(text);
-        }
+        const text = results[0]?.result || '';
+        const { dois, pmids } = extractDOIsAndPMIDs(text);
+        if (dois.length) renderDOIList(dois);
+        if (pmids.length) renderPMIDList(pmids);
       }
     );
   });
