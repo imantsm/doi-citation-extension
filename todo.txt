@@ -2,3 +2,4 @@ List of features to add
 
 [x] User selection persistence
 [ ] Let user save frequently used citations
+[ ] Add link to settings in the popup
